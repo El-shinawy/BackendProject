@@ -329,6 +329,9 @@ class HospitalFullSerializer(serializers.ModelSerializer):
     completed_surgeries_count = serializers.SerializerMethodField()
     under_review_surgeries_count = serializers.SerializerMethodField()
     alerts_hospitals = serializers.SerializerMethodField()
+    matches = serializers.SerializerMethodField()
+    surgeries = serializers.SerializerMethodField()
+
     
 
     class Meta:
@@ -338,8 +341,31 @@ class HospitalFullSerializer(serializers.ModelSerializer):
             'phone', 'emergency_phone', 'email', 'working_hours',
             'patients_count', 'donors_count', 'patients', 'donors' ,
             'total_matches', 'total_surgeries', 'scheduled_surgeries_count',
-            'ongoing_surgeries_count', 'completed_surgeries_count', 'under_review_surgeries_count', 'alerts_hospitals'
+            'ongoing_surgeries_count', 'completed_surgeries_count', 'under_review_surgeries_count', 'alerts_hospitals',
+            'matches' ,'surgeries'
         ]
+
+    # get كل الـ matches لكل المرضى والمانحين في المستشفى
+
+    def get_matches(self, obj):
+        matches = OrganMatching.objects.filter(
+            patient__hospital=obj
+        )
+        return OrganMatchingSerializer(matches, many=True).data
+    
+    # get كل الـ surgeries لكل المرضى والمانحين في المستشفى
+    def get_surgeries(self, obj):
+        surgeries = Surgery.objects.filter(
+            hospital=obj
+        )
+        return SurgerySerializer(surgeries, many=True).data
+    
+    # all surgeries for all patients and donors in the hospital
+    def get_total_surgeries(self, obj):
+        return Surgery.objects.filter(
+            hospital=obj
+        ).count()
+
 
     def get_alerts_hospitals(self, obj):
         alerts = AlertHospital.objects.filter(hospital=obj)
@@ -392,11 +418,7 @@ class HospitalFullSerializer(serializers.ModelSerializer):
         return OrganMatching.objects.filter(
             patient__hospital=obj
         ).count()
-    def get_total_surgeries(self, obj):
-    # جميع العمليات لجميع المرضى في المستشفى
-        return Surgery.objects.filter(
-            organ_matching__patient__hospital=obj
-        ).count()
+
     def get_scheduled_surgeries_count(self, obj):
         return Surgery.objects.filter(hospital=obj, status='مجدولة').count()
 
