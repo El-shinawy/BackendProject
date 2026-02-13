@@ -16,7 +16,7 @@ admin.site.register(PatientPriority)
 admin.site.register(Alert)
 admin.site.register(UserReport)
 admin.site.register(SurgeryReport)
-admin.site.register(VitalSign)
+# admin.site.register(VitalSign)
 
 
 

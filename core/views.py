@@ -6,11 +6,15 @@ from django.core.exceptions import ValidationError
 from .models import *
 from .serializers import *
 from rest_framework import generics, status
-from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import authenticate
 from django.db.models import Count, Q
+from rest_framework import viewsets
+from rest_framework.decorators import action
+
+from .models import User
+from .serializers import UserSerializer
 
 
 
@@ -33,20 +37,16 @@ class RegisterUserView(generics.CreateAPIView):
         token, _ = Token.objects.get_or_create(user=user)
         return Response({
             "id": user.id,
-            "national_id": user.national_id,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
+            # "national_id": user.national_id,
+            # "first_name": user.first_name,
+            # "last_name": user.last_name,
             "role": user.role,
-            "password": user._temp_password,
+            # "password": user._temp_password,
             "token": token.key,
             "message": "User registered successfully"
         }, status=status.HTTP_201_CREATED)
 
 
-# login
-class LoginSerializer(serializers.Serializer):
-    national_id = serializers.CharField(required=True)
-    password = serializers.CharField(write_only=True, required=True)
 
 
 # ======================
@@ -77,9 +77,6 @@ class LoginUserView(generics.GenericAPIView):
         token, _ = Token.objects.get_or_create(user=user)
         return Response({
             "id": user.id,
-            "national_id": user.national_id,
-            "first_name": user.first_name,
-            "last_name": user.last_name,
             "role": user.role,
             "token": token.key,
             "Message": "Login successful"
@@ -326,7 +323,7 @@ class OrganMatchingViewSet(viewsets.ModelViewSet):
                         "organ_type": getattr(patient.patient_profile, 'organ_needed', 'N/A'),
                         "match_percentage": result['match_percentage'],
                         "ai_result": result['ai_result'],
-                        "status": 'pending'
+                        "status": 'في الانتظار'  # الحالة الافتراضية
                     }
                 )
                 all_matches.append({
@@ -412,12 +409,22 @@ class AlertViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Alert marked as read"})
 
 
-from rest_framework import viewsets
-from rest_framework.decorators import action
-from rest_framework.response import Response
-from django.db.models import Q, Count
-from .models import User
-from .serializers import UserSerializer
+
+class HospitalAlertViewSet(viewsets.ModelViewSet):
+    queryset = Alert.objects.all()
+    serializer_class = AlertHospitalSerializer
+
+    def get_queryset(self):
+            return Alert.objects.all().order_by('-created_at') 
+    @action(detail=True, methods=['post'])
+    def mark_read(self, request, pk=None):
+            alert = self.get_object()
+            alert.read = True
+            alert.save()
+            return Response({"detail": "Alert marked as read"})
+
+
+
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -490,26 +497,32 @@ class UserReportViewSet(viewsets.ModelViewSet):
 class SurgeryReportViewSet(viewsets.ModelViewSet):
     queryset = SurgeryReport.objects.select_related(
         'surgery__organ_matching__patient',
-        'surgery__doctor'
+        'surgery__doctor',
+        'surgery__hospital'
     )
     serializer_class = SurgeryReportSerializer
-
     def perform_create(self, serializer):
         report = serializer.save()
 
+        # 🔔 Alert للمريض
         patient = report.surgery.organ_matching.patient
-
-        # 🔔 إنشاء Alert للمريض
         Alert.objects.create(
             user=patient,
-            message="تم إضافة تقرير العملية الجراحية الخاصة بك.",
+            message=f"تم إضافة تقرير العملية الجراحية الخاصة بك: {report.surgery.surgery_number}",
             alert_type='medical'
         )
 
+        # 🔔 Alert للمستشفى
+        hospital = report.surgery.hospital
+        if hospital:
+            Alert.objects.create(
+                hospital=hospital,
+                message=f"تم إضافة تقرير عملية {report.surgery.surgery_number}.",
+                alert_type='hospital'
+            )
+
         # 📊 تحديث أولوية المريض
         priority, created = PatientPriority.objects.get_or_create(patient=patient)
-
-        # مثال بسيط للتحديث
         priority.score += 10
         if priority.score >= 80:
             priority.level = 'critical'
@@ -519,12 +532,15 @@ class SurgeryReportViewSet(viewsets.ModelViewSet):
             priority.level = 'medium'
         else:
             priority.level = 'low'
-
         priority.save()
 
 
 
+# class VitalSignViewSet(viewsets.ModelViewSet):
+#     queryset = VitalSign.objects.all().order_by('-recorded_at')
+#     serializer_class = VitalSignSerializer
 
-class VitalSignViewSet(viewsets.ModelViewSet):
-    queryset = VitalSign.objects.all().order_by('-recorded_at')
-    serializer_class = VitalSignSerializer
+
+
+
+    

@@ -83,11 +83,14 @@ class User(AbstractBaseUser, PermissionsMixin):
    
     updated_at = models.DateTimeField(auto_now=True)
     
-    supervisor_doctors = models.ManyToManyField(
-        'Doctor',
-        related_name="patients",
+    supervisor_doctor = models.ForeignKey(
+    'Doctor',
+    on_delete=models.SET_NULL,   # أو CASCADE حسب منطق المشروع
+    related_name="patients",
+    null=True,
     blank=False
-    )
+)
+
     hospital = models.ForeignKey(
         'Hospital', null=True, blank=True,
         on_delete=models.SET_NULL, related_name='users'
@@ -279,7 +282,7 @@ class OrganMatching(models.Model):
     patient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='patient_matches')
     donor = models.ForeignKey(User, on_delete=models.CASCADE, related_name='donor_matches')
     organ_type = models.CharField(max_length=50)
-    match_percentage = models.FloatField(default=0) 
+    match_percentage = models.FloatField( null=True,        blank=True,      default=None      )
     ai_result = models.JSONField(null=True, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
@@ -347,8 +350,28 @@ class OrganMatching(models.Model):
 
 # Surgery
 class Surgery(models.Model):
+    SURGERY_STATUS = [
+        ('مجدولة', 'مجدولة'),
+        ('جاريه', 'جاريه'),
+        ('مكتملة', 'مكتملة'),
+        ('تحت المتابعة', 'تحت المتابعة'),
+    ]
+    DEPARTMENT_CHOICES = [
+        ('قلب', 'قلب'),
+        ('كبد', 'كبد'),
+        ('كلى', 'كلى'),
+        ('رئة', 'رئة'),
+        ('عظام', 'عظام'),
+    ]
+     
     surgery_number = models.CharField(max_length=50, unique=True)
     organ_matching = models.OneToOneField(OrganMatching, on_delete=models.CASCADE)
+    surgery_name = models.CharField(max_length=100)
+    department = models.CharField(
+        max_length=50,
+        choices=DEPARTMENT_CHOICES,
+        default='كلى'
+    )
 
     hospital = models.ForeignKey(Hospital, on_delete=models.CASCADE , null=False)
     doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, null=True )
@@ -356,38 +379,42 @@ class Surgery(models.Model):
     scheduled_date = models.DateField()
     scheduled_time = models.TimeField(null=True, blank=True)
 
-
-    completed = models.BooleanField(default=False)
+    status = models.CharField(
+        max_length=20,
+        choices=SURGERY_STATUS,
+        default='مجدولة'
+    )
     duration = models.PositiveIntegerField(null=True, blank=True)  
     operation_room = models.CharField(max_length=100, null=True, blank=True) 
 
     created_at = models.DateTimeField(auto_now_add=True)
+
     def clean(self):
         if self.scheduled_time:
             surgery_datetime = datetime.datetime.combine(
                 self.scheduled_date,
                 self.scheduled_time
             )
-
             surgery_datetime = timezone.make_aware(
                 surgery_datetime,
                 timezone.get_current_timezone()
             )
-
             if surgery_datetime <= timezone.now():
                 raise ValidationError("Surgery must be in the future")
         else:
             if self.scheduled_date < timezone.now().date():
                 raise ValidationError("Surgery date must be in the future")
 
-    
     def __str__(self):
         return f"Surgery {self.surgery_number}"
-    
+
     def get_admin_url(self):
         return reverse("admin:core_surgery_change", args=[self.id])
-
-
+    
+    # ============================
+    # اسم العملية والـ قسم
+    # ============================
+    
 # MRI Reports
 class MRIReport(models.Model):
     patient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='mri_reports')
@@ -412,10 +439,10 @@ class PatientPriority(models.Model):
     level = models.CharField(
         max_length=20,
     choices = [
-    ('منخفض', 'منخفض'),
-    ('متوسط', 'متوسط'),
-    ('مرتفع', 'مرتفع'),
-    ('حرج', 'حرج')
+    ('اولوليه عاليه', 'اولوليه عاليه'),
+    ('اولوليه متوسطة', 'اولوليه متوسطة'),
+    ('اولوليه منخفضه', 'اولوليه منخفضه'),
+
 ]
     )
     updated_at = models.DateTimeField(auto_now=True)
@@ -433,6 +460,7 @@ class Alert(models.Model):
     ('حرج', 'حرج'),
 )
 
+    
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='alerts')
     message_title = models.TextField()
     message = models.TextField(default="title")
@@ -443,6 +471,24 @@ class Alert(models.Model):
 
     def __str__(self):
         return f"{self.user} - {self.alert_type}"
+class AlertHospital(models.Model):
+    ALERT_TYPES = (
+    ('معلومة', 'معلومة'),
+    ('تحذير', 'تحذير'),
+    ('حرج', 'حرج'),
+)
+
+    
+    hospital = models.ForeignKey(Hospital, on_delete=models.CASCADE, null=True, blank=True)
+    message_title = models.TextField()
+    message = models.TextField(default="title")
+    alert_type = models.CharField(max_length=20, choices=ALERT_TYPES)
+    read = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.hospital} - {self.alert_type}"
 
 
 class UserReport(models.Model):
@@ -471,36 +517,40 @@ class SurgeryReport(models.Model):
     complications = models.TextField(null=True, blank=True)
     doctor_notes = models.TextField(null=True, blank=True)
 
-    # Vital Signs
+    blood_pressure = models.CharField(max_length=20, null=True, blank=True) 
+    recorded_at = models.DateTimeField(auto_now_add=True)
     temperature_c = models.FloatField(null=True, blank=True)
     heart_rate = models.PositiveIntegerField(null=True, blank=True)
-    blood_pressure_systolic = models.PositiveIntegerField(null=True, blank=True)
-    blood_pressure_diastolic = models.PositiveIntegerField(null=True, blank=True)
     respiratory_rate = models.PositiveIntegerField(null=True, blank=True)
     oxygen_saturation = models.FloatField(null=True, blank=True)
 
     report_file = models.FileField(upload_to='surgery_reports/files/', null=True, blank=True)
     report_image = models.ImageField(upload_to='surgery_reports/images/', null=True, blank=True)
-
     created_at = models.DateTimeField(auto_now_add=True)
 
 
 
 
-class VitalSign(models.Model):
-    surgery_report = models.ForeignKey(
-        SurgeryReport,
-        on_delete=models.CASCADE,
-        related_name='vital_signs'
-    )
-    temperature_c = models.FloatField(null=True, blank=True)  
-    heart_rate = models.PositiveIntegerField(null=True, blank=True) 
- 
-    blood_pressure = models.CharField(max_length=20, null=True, blank=True) 
-    respiratory_rate = models.PositiveIntegerField(null=True, blank=True) 
-    oxygen_saturation = models.FloatField(null=True, blank=True)  
 
-    recorded_at = models.DateTimeField(auto_now_add=True)
 
-    def __str__(self):
-        return f"Vitals for {self.surgery_report.surgery.surgery_number} @ {self.recorded_at}"
+
+
+
+
+
+
+
+
+
+
+
+# class VitalSign(models.Model):
+#     surgery_report = models.ForeignKey(
+#         SurgeryReport,
+#         on_delete=models.CASCADE,
+#         related_name='vital_signs'
+#     )
+
+
+#     def __str__(self):
+#         return f"Vitals for {self.surgery_report.surgery.surgery_number} @ {self.recorded_at}"

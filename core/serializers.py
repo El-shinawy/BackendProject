@@ -3,17 +3,18 @@ from .models import *
 from django.contrib.auth import authenticate
 from django.utils import timezone
 import datetime
-
+from rest_framework import serializers
+from .models import SurgeryReport, Surgery
 
 # register users
 class RegisterSerializer(serializers.ModelSerializer):
     role = serializers.ChoiceField(choices=[('patient','Patient'), ('donor','Donor')])
     organ = serializers.ChoiceField(choices=OrganType.choices, write_only=True) 
-    supervisor_doctors = serializers.PrimaryKeyRelatedField(
-    many=True,
+    supervisor_doctor = serializers.PrimaryKeyRelatedField(
     queryset=Doctor.objects.all(),
-    required=False  # مش لازم تحط دكتور دايمًا
-) # العضو المطلوب أو المتاح
+    required=False
+)
+
 
     class Meta:
         model = User
@@ -21,7 +22,7 @@ class RegisterSerializer(serializers.ModelSerializer):
             'national_id', 'first_name', 'last_name', 'role',
             'birthdate', 'height_cm', 'weight_kg',
             'blood_type', 'gender', 'phone', 'hospital',
-            'organ','medical_record_number','supervisor_doctors'
+            'organ','medical_record_number','supervisor_doctor'
         ]
 
     #  تحقق من الرقم القومي
@@ -35,7 +36,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     #  إنشاء المستخدم والبروفايل حسب الدور
     def create(self, validated_data):
         organ = validated_data.pop('organ')
-        doctors = validated_data.pop('supervisor_doctors', [])
+        doctor = validated_data.pop('supervisor_doctor', None)
         national_id = validated_data['national_id']
         role = validated_data['role']
 
@@ -47,9 +48,10 @@ class RegisterSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
 
-        # ربط الدكاترة
-        if doctors:
-            user.supervisor_doctors.set(doctors)
+        if doctor:
+            user.supervisor_doctor = doctor
+            user.save()
+
 
         # إنشاء profile حسب الدور
         if role == 'patient':
@@ -101,7 +103,6 @@ class HospitalLoginSerializer(serializers.Serializer):
 class UserSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField(read_only=True)
     surgeries = serializers.SerializerMethodField()
-    # دمج بيانات Patient / Donor Profile
     organ_needed = serializers.SerializerMethodField()
     organ_available = serializers.SerializerMethodField()
     chronic_diseases = serializers.SerializerMethodField()
@@ -113,7 +114,11 @@ class UserSerializer(serializers.ModelSerializer):
     priority = serializers.SerializerMethodField()
     alerts = serializers.SerializerMethodField()
     user_reports = serializers.SerializerMethodField()
-    supervisor_doctors = serializers.PrimaryKeyRelatedField(many=True,queryset=Doctor.objects.all(),required=False)
+    supervisor_doctor = serializers.PrimaryKeyRelatedField(
+    queryset=Doctor.objects.all(),
+    required=False
+)
+
 
 
     class Meta:
@@ -122,14 +127,14 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'national_id', 'first_name', 'last_name', 'full_name', 'role', 'status',
             'birthdate', 'height_cm', 'weight_kg', 'bmi', 'blood_type', 'gender',
             'HLA_A_1','HLA_A_2','HLA_B_1','HLA_B_2','HLA_DR_1','HLA_DR_2',
-            'PRA','CMV_status','EBV_status','supervisor_doctors',
+            'PRA','CMV_status','EBV_status','supervisor_doctor','updated_at',
             'hospital',
             'is_active','is_staff','created_at','medical_record_number','surgeries',
             # بيانات profile
             'organ_needed','organ_available','chronic_diseases','hospital_detail','supervisor_doctors_detail',
             "appointments","mri_reports","surgery_reports","priority","alerts",'user_reports'
         ]
-        read_only_fields = ['bmi', 'created_at']
+        read_only_fields = ['bmi', 'created_at' , 'updated_at']
 
 
     def get_full_name(self, obj):
@@ -168,9 +173,13 @@ class UserSerializer(serializers.ModelSerializer):
     def get_supervisor_doctors_detail(self, obj):
     # access from User مباشرة
         if obj.role == 'patient':
-            doctors = obj.supervisor_doctors.all()
-            from .serializers import DoctorSerializer
-            return DoctorSerializer(doctors, many=True).data
+            if obj.supervisor_doctor:
+                from .serializers import DoctorSerializer
+                return DoctorSerializer(obj.supervisor_doctor).data
+            
+            return None
+            
+  
         return []
 
 
@@ -215,12 +224,33 @@ class UserSerializer(serializers.ModelSerializer):
         from .serializers import AlertSerializer
         qs = Alert.objects.filter(user=obj)
         return AlertSerializer(qs, many=True).data
-    
-    def get_surgeries(self, obj):
-        from .serializers import SurgerySerializer
-        qs = Surgery.objects.filter(organ_matching__patient=obj)\
-            .select_related('doctor', 'hospital', 'organ_matching')
-        return SurgerySerializer(qs, many=True).data
+        
+def get_surgeries(self, obj):
+    from .serializers import SurgerySerializer
+
+    if obj.role == 'patient':
+        qs = Surgery.objects.filter(
+            organ_matching__patient=obj
+        ).select_related(
+            'doctor', 'hospital', 'organ_matching'
+        ).order_by('-scheduled_date')  # آخر عملية
+
+    elif obj.role == 'donor':
+        qs = Surgery.objects.filter(
+            organ_matching__donor=obj
+        ).select_related(
+            'doctor', 'hospital', 'organ_matching'
+        ).order_by('-scheduled_date')  # آخر عملية
+
+    else:
+        return None
+
+    # ترجع العملية الأولى فقط بدل كل العمليات
+    latest_surgery = qs.first()
+    if latest_surgery:
+        return SurgerySerializer(latest_surgery).data
+    return None
+
 # ==========================
 
 class UserMiniSerializer(serializers.ModelSerializer):
@@ -292,14 +322,28 @@ class HospitalFullSerializer(serializers.ModelSerializer):
     donors = serializers.SerializerMethodField()
     patients_count = serializers.SerializerMethodField()
     donors_count = serializers.SerializerMethodField()
+    total_matches = serializers.SerializerMethodField()
+    total_surgeries = serializers.SerializerMethodField()
+    scheduled_surgeries_count = serializers.SerializerMethodField()
+    ongoing_surgeries_count = serializers.SerializerMethodField()
+    completed_surgeries_count = serializers.SerializerMethodField()
+    under_review_surgeries_count = serializers.SerializerMethodField()
+    alerts_hospitals = serializers.SerializerMethodField()
+    
 
     class Meta:
         model = Hospital
         fields = [
             'id', 'name', 'hospital_type', 'location', 'license_number', 
             'phone', 'emergency_phone', 'email', 'working_hours',
-            'patients_count', 'donors_count', 'patients', 'donors'
+            'patients_count', 'donors_count', 'patients', 'donors' ,
+            'total_matches', 'total_surgeries', 'scheduled_surgeries_count',
+            'ongoing_surgeries_count', 'completed_surgeries_count', 'under_review_surgeries_count', 'alerts_hospitals'
         ]
+
+    def get_alerts_hospitals(self, obj):
+        alerts = AlertHospital.objects.filter(hospital=obj)
+        return AlertHospitalSerializer(alerts, many=True).data
 
     def get_patients(self, obj):
         qs = obj.users.filter(role='patient')
@@ -343,6 +387,28 @@ class HospitalFullSerializer(serializers.ModelSerializer):
 
     def get_donors_count(self, obj):
         return obj.users.filter(role='donor').count()
+    def get_total_matches(self, obj):
+        # عدد كل الـ matches لجميع المرضى والمانحين في المستشفى
+        return OrganMatching.objects.filter(
+            patient__hospital=obj
+        ).count()
+    def get_total_surgeries(self, obj):
+    # جميع العمليات لجميع المرضى في المستشفى
+        return Surgery.objects.filter(
+            organ_matching__patient__hospital=obj
+        ).count()
+    def get_scheduled_surgeries_count(self, obj):
+        return Surgery.objects.filter(hospital=obj, status='مجدولة').count()
+
+    def get_ongoing_surgeries_count(self, obj):
+        return Surgery.objects.filter(hospital=obj, status='جاريه').count()
+
+    def get_completed_surgeries_count(self, obj):
+        return Surgery.objects.filter(hospital=obj, status='مكتملة').count()
+
+    def get_under_review_surgeries_count(self, obj):
+        return Surgery.objects.filter(hospital=obj, status='تحت المتابعة').count()
+
 
 
 
@@ -407,8 +473,10 @@ class PatientMedicalProfileSerializer(serializers.ModelSerializer):
         return None
 
     def get_supervisor_doctor_detail(self, obj):
-        doctors = obj.patient.supervisor_doctors.all()   # ✅ من User
-        return DoctorSerializer(doctors, many=True).data
+        if obj.patient.supervisor_doctor:
+         return DoctorSerializer(obj.patient.supervisor_doctor).data
+        return None
+
 
 
 
@@ -442,8 +510,10 @@ class DonorMedicalProfileSerializer(serializers.ModelSerializer):
         return None
 
     def get_supervisor_doctor_detail(self, obj):
-        doctors = obj.donor.supervisor_doctors.all()  # ✅ من User
-        return DoctorSerializer(doctors, many=True).data  
+        if obj.donor.supervisor_doctor:
+            return DoctorSerializer(obj.donor.supervisor_doctor).data
+        return None
+
 
 # Appointment
 
@@ -538,13 +608,15 @@ class SurgerySerializer(serializers.ModelSerializer):
     doctor_detail = DoctorSerializer(source='doctor', read_only=True)
     hospital_detail = HospitalSerializer(source='hospital', read_only=True)
 
+
     class Meta:
         model = Surgery
         fields = [
             'id', 'surgery_number', 'organ_matching', 'organ_matching_detail',
             'hospital', 'hospital_detail', 'doctor', 'doctor_detail',
-            'scheduled_date', 'scheduled_time', 'completed', 'created_at','duration',
-            'operation_room'
+            'scheduled_date', 'scheduled_time', 'status', 'created_at','duration',
+            'operation_room','surgery_name','department',
+            
         ]
 
 
@@ -583,10 +655,21 @@ class AlertSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Alert
-        fields = ['id', 'user', 'user_detail', 'message','message_title', 'alert_type', 'read', 'created_at']
+        fields = ['id', 'user', 'user_detail', 'message','message_title', 'alert_type', 'read', 'created_at' ,]
 
     def get_user_detail(self, obj):
         return {"id": obj.user.id, "full_name": f"{obj.user.first_name} {obj.user.last_name}"}
+    
+
+class AlertHospitalSerializer(serializers.ModelSerializer):
+    hospital_detail = HospitalSerializer(source='hospital', read_only=True)
+
+    class Meta:
+        model = AlertHospital
+        fields = ['id', 'hospital', 'hospital_detail', 'message','message_title', 'alert_type', 'read', 'created_at' ,]
+
+    def get_hospital_detail(self, obj):
+        return {"id": obj.hospital.id, "name": obj.hospital.name}
 
 
 
@@ -612,25 +695,37 @@ class UserReportSerializer(serializers.ModelSerializer):
     
 
 
+
 class SurgeryReportSerializer(serializers.ModelSerializer):
+    # عرض أسماء الطرفيات
     patient_name = serializers.CharField(source='surgery.organ_matching.patient.__str__', read_only=True)
     doctor_name = serializers.CharField(source='surgery.doctor.name', read_only=True)
     hospital_name = serializers.CharField(source='surgery.hospital.name', read_only=True)
-    surgery_detail = SurgerySerializer(source='surgery', read_only=True)
+    surgery_detail = serializers.SerializerMethodField(read_only=True)  # بدل الـ nested كامل
 
+    # اختيار الجراحة عند الإنشاء بالاسم
+    surgery_number = serializers.SlugRelatedField(
+        queryset=Surgery.objects.all(),
+        slug_field='surgery_number',
+        source='surgery',  # يرتبط بالـ ForeignKey 'surgery'
+        write_only=True
+    )
 
-    duration = serializers.IntegerField(
-    source='surgery.duration',
-    read_only=True
-)
+    # اسم العملية للعرض في GET
+    surgery_name = serializers.CharField(
+        source='surgery.surgery_number',
+        read_only=True
+    )
 
-
+    duration = serializers.IntegerField(source='surgery.duration', read_only=True)
     operation_room = serializers.CharField(source='surgery.operation_room', read_only=True)
 
     class Meta:
         model = SurgeryReport
         fields = [
             'id',
+            'surgery_number',   # للـ POST
+            'surgery_name',     # للـ GET
             'surgery_detail',
             'patient_name',
             'doctor_name',
@@ -643,33 +738,76 @@ class SurgeryReportSerializer(serializers.ModelSerializer):
             'report_file',
             'report_image',
             'created_at',
-        ]
-
-
-
-
-class VitalSignSerializer(serializers.ModelSerializer):
-    # للعرض في GET
-    surgery_report = SurgeryReportSerializer(read_only=True)
-
-    # للاختيار عند الإنشاء
-    surgery_number = serializers.SlugRelatedField(
-        queryset=Surgery.objects.all(),     
-        slug_field='surgery_number',         
-        source='surgery',                    
-        write_only=True
-    )
-
-    class Meta:
-        model = VitalSign
-        fields = [
-            'surgery_report',   
-            'surgery_number',   
+            'blood_pressure',
             'temperature_c',
             'heart_rate',
-            'blood_pressure',
             'respiratory_rate',
             'oxygen_saturation',
-            'recorded_at'
+            'recorded_at',
+
+
         ]
-        read_only_fields = ['recorded_at']
+
+    def get_surgery_detail(self, obj):
+        # ممكن تعرض معلومات مختصرة عن الجراحة بدل الـ nested serializer الكامل
+        return {
+            "surgery_number": obj.surgery.surgery_number,
+            "status": obj.surgery.status,
+            "scheduled_date": obj.surgery.scheduled_date,
+        }
+
+#  class VitalSignSerializer(serializers.ModelSerializer):
+    # # للعرض في GET
+    # surgery_report = SurgeryReportSerializer(read_only=True)
+
+    # # للاختيار عند الإنشاء
+    # surgery_number = serializers.SlugRelatedField(
+    #     queryset=Surgery.objects.all(),     
+    #     slug_field='surgery_number',         
+    #     source='surgery',                    
+    #     write_only=True
+    # )
+
+    # class Meta:
+    #     model = VitalSign
+    #     fields = [
+    #         'surgery_report',   
+    #         'surgery_number',   
+    #         'temperature_c',
+    #         'heart_rate',
+    #         'blood_pressure',
+    #         'respiratory_rate',
+    #         'oxygen_saturation',
+    #         'recorded_at'
+    #     ]
+    #     read_only_fields = ['recorded_at']
+
+
+
+
+# serializers.py
+
+
+class HospitalAlertSerializer(serializers.ModelSerializer):
+    hospital_detail = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Alert
+        fields = [
+            'id',
+            'hospital',
+            'hospital_detail',
+            'message_title',
+            'message',
+            'alert_type',
+            'read',
+            'created_at'
+        ]
+
+    def get_hospital_detail(self, obj):
+        if obj.hospital:
+            return {
+                "id": obj.hospital.id,
+                "name": obj.hospital.name
+            }
+        return None

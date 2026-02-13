@@ -42,7 +42,8 @@ router.register(r'UserReport', UserReportViewSet, basename='UserReport')
 router.register(r'surgery-reports', SurgeryReportViewSet, basename='surgery-reports')
 router.register(r'patient-priority', PatientPriorityViewSet, basename='patient-priority')
 router.register(r'alerts', AlertViewSet, basename='alert')
-router.register(r'vital-signs', VitalSignViewSet, basename='vital-signs')
+# router.register(r'vital-signs', VitalSignViewSet, basename='vital-signs')
+router.register(r'hospital-alerts', HospitalAlertViewSet, basename='hospital-alert')
 
 
 

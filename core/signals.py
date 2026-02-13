@@ -1,82 +1,21 @@
+# signals.py
 from django.db.models.signals import post_save, pre_save, m2m_changed
 from django.dispatch import receiver
-from .models import User, DonorMedicalProfile, PatientMedicalProfile, ChronicDisease, PatientPriority, OrganMatching
+from .models import (
+    User, PatientMedicalProfile, DonorMedicalProfile,
+    PatientPriority, VitalSign, Alert, OrganMatching
+)
 
-# # ==========================
-# # 1. Update BMI / eligibility
-# # ==========================
-# @receiver(post_save, sender=User)
-# def update_donor_eligibility(sender, instance, created, **kwargs):
-#     if instance.role == 'donor':
-#         # لو height أو weight موجودة
-#         if instance.height_cm and instance.weight_kg:
-#             height_m = instance.height_cm / 100
-#             instance.bmi = round(instance.weight_kg / (height_m ** 2), 2)
-#             instance.save(update_fields=['bmi'])
-#         # تحديث كل الـ OrganMatching اللي متعلقين بالـ donor
-#         for match in instance.donor_matches.all():
-#             match.update_match()
-
-# # ==========================
-# # 2. Update Patient Priority
-# # ==========================
-# @receiver(post_save, sender=PatientMedicalProfile)
-# def recalc_patient_priority(sender, instance, **kwargs):
-#     patient = instance.patient
-#     if hasattr(patient, 'priority'):
-#         patient.priority.delete()  # delete old
-#     # إعادة حساب
-#     score = 0
-#     if patient.chronic_diseases.exists():
-#         score += patient.chronic_diseases.count() * 10
-#     if instance.organ_needed:
-#         score += 20
-#     level = 'low'
-#     if score >= 50:
-#         level = 'critical'
-#     elif score >= 30:
-#         level = 'high'
-#     elif score >= 10:
-#         level = 'medium'
-#     PatientPriority.objects.create(patient=patient, score=score, level=level)
-
-# # ==========================
-# # 3. Update Priority on chronic diseases changes
-# # ==========================
-# @receiver(m2m_changed, sender=User.chronic_diseases.through)
-# def recalc_priority_on_disease_change(sender, instance, **kwargs):
-#     if hasattr(instance, 'priority'):
-#         instance.priority.delete()
-#     score = 0
-#     if instance.chronic_diseases.exists():
-#         score += instance.chronic_diseases.count() * 10
-#     if hasattr(instance, 'patient_profile') and instance.patient_profile.organ_needed:
-#         score += 20
-#     level = 'low'
-#     if score >= 50:
-#         level = 'critical'
-#     elif score >= 30:
-#         level = 'high'
-#     elif score >= 10:
-#         level = 'medium'
-#     PatientPriority.objects.create(patient=instance, score=score, level=level)
-
-from django.db.models.signals import post_save, m2m_changed
-from django.dispatch import receiver
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-from .models import VitalSign, Alert
-
-@receiver(post_save, sender=PatientMedicalProfile)
-def recalc_patient_priority(sender, instance, **kwargs):
-    patient = instance.patient
-    if hasattr(patient, 'priority'):
-        patient.priority.delete()
+# ==========================
+# 1️⃣ Patient Priority Helper
+# ==========================
+def calculate_patient_priority(patient):
     score = 0
     if patient.chronic_diseases.exists():
         score += patient.chronic_diseases.count() * 10
-    if instance.organ_needed:
+    if hasattr(patient, 'patient_profile') and patient.patient_profile.organ_needed:
         score += 20
+
     level = 'low'
     if score >= 50:
         level = 'critical'
@@ -84,32 +23,34 @@ def recalc_patient_priority(sender, instance, **kwargs):
         level = 'high'
     elif score >= 10:
         level = 'medium'
-    PatientPriority.objects.create(patient=patient, score=score, level=level)
+
+    priority, created = PatientPriority.objects.get_or_create(
+        patient=patient, defaults={"score": score, "level": level}
+    )
+    if not created:
+        priority.score = score
+        priority.level = level
+        priority.save()
+
+
+# ==========================
+# 1a. Update Priority on Profile Save
+# ==========================
+@receiver(post_save, sender=PatientMedicalProfile)
+def recalc_patient_priority(sender, instance, **kwargs):
+    calculate_patient_priority(instance.patient)
+
+# ==========================
+# 1b. Update Priority on chronic_diseases change
+# ==========================
 @receiver(m2m_changed, sender=User.chronic_diseases.through)
 def recalc_priority_on_disease_change(sender, instance, **kwargs):
-    if hasattr(instance, 'priority'):
-        instance.priority.delete()
-    score = 0
-    if instance.chronic_diseases.exists():
-        score += instance.chronic_diseases.count() * 10
-    if hasattr(instance, 'patient_profile') and instance.patient_profile.organ_needed:
-        score += 20
-    level = 'low'
-    if score >= 50:
-        level = 'critical'
-    elif score >= 30:
-        level = 'high'
-    elif score >= 10:
-        level = 'medium'
-    PatientPriority.objects.create(patient=instance, score=score, level=level)
+    calculate_patient_priority(instance)
 
 
-
-# signals.py
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-from .models import VitalSign, Alert, PatientPriority
-
+# ==========================
+# 2️⃣ VitalSign Alerts + Priority
+# ==========================
 @receiver(post_save, sender=VitalSign)
 def vital_sign_alert_and_priority(sender, instance, created, **kwargs):
     if not created:
@@ -132,10 +73,10 @@ def vital_sign_alert_and_priority(sender, instance, created, **kwargs):
         score_delta += 10
 
     if instance.heart_rate is not None and instance.heart_rate > 120:
-        alerts.append("ارتفاع ضربات القلب")
+        alerts.append("ارتفاع معدل ضربات القلب")
         score_delta += 10
 
-    if instance.blood_pressure_systolic and instance.blood_pressure_systolic > 160:
+    if instance.blood_pressure and instance.blood_pressure > 160:
         alerts.append("ارتفاع ضغط الدم")
         score_delta += 10
 
@@ -147,9 +88,10 @@ def vital_sign_alert_and_priority(sender, instance, created, **kwargs):
         )
 
     # تحديث Patient Priority
-    priority, _ = PatientPriority.objects.get_or_create(patient=patient, defaults={"score": 0, "level": "low"})
+    priority, _ = PatientPriority.objects.get_or_create(
+        patient=patient, defaults={"score": 0, "level": "low"}
+    )
     priority.score += score_delta
-
     if priority.score >= 70:
         priority.level = "critical"
     elif priority.score >= 40:
@@ -158,28 +100,69 @@ def vital_sign_alert_and_priority(sender, instance, created, **kwargs):
         priority.level = "medium"
     else:
         priority.level = "low"
-
     priority.save()
 
-    if not created:
-        return
 
-    patient = instance.surgery_report.surgery.organ_matching.patient
+# ==========================
+# 3️⃣ Smart OrganMatching Signal
+# ==========================
+@receiver(post_save, sender=OrganMatching)
+def smart_match_status_handler(sender, instance, **kwargs):
+    """
+    إدارة ذكية لكل تغييرات الـ Match:
+    - التأكيد → تحديث حالات + Alerts
+    - الإلغاء → إعادة الحالة + Alerts
+    - تعديل → تحديث Alerts
+    """
+    patient = instance.patient
+    donor = instance.donor
+    hospital = getattr(patient, 'hospital', None)
 
-    alerts = []
+    # الحالة الافتراضية لكل من المريض والمتبرع
+    patient_status = 'قيد الانتظار'
+    donor_status = 'قيد الانتظار'
 
-    if instance.oxygen_saturation is not None and instance.oxygen_saturation < 92:
-        alerts.append("انخفاض نسبة الأكسجين")
+    if instance.status == 'match_confirmed':
+        patient_status = 'تأكيد'
+        donor_status = 'محجوز'
+        patient_alert = f"تم تأكيد حالتك بعد الحصول على Match للعضو: {instance.organ_type}"
+        donor_alert = f"تم تأكيد عملية التبرع للعضو: {instance.organ_type}"
+        hospital_alert = f"تم تأكيد Match للعضو {instance.organ_type} بين المريض {patient.first_name} {patient.last_name} والمتبرع {donor.first_name} {donor.last_name}"
+        alert_type = 'medical'
 
-    if instance.temperature_c is not None and instance.temperature_c >= 38:
-        alerts.append("ارتفاع درجة الحرارة")
+    elif instance.status == 'match_cancelled':
+        patient_status = 'قيد الانتظار'
+        donor_status = 'قيد الانتظار'
+        patient_alert = f"تم إلغاء Match للعضو: {instance.organ_type}"
+        donor_alert = f"تم إلغاء Match للعضو: {instance.organ_type}"
+        hospital_alert = f"تم إلغاء Match للعضو {instance.organ_type} بين المريض {patient.first_name} {patient.last_name} والمتبرع {donor.first_name} {donor.last_name}"
+        alert_type = 'warning'
 
-    if instance.heart_rate is not None and instance.heart_rate > 120:
-        alerts.append("ارتفاع معدل ضربات القلب")
+    else:
+        # أي حالة أخرى → تحديث Alerts فقط
+        patient_alert = f"تم تعديل Match للعضو: {instance.organ_type}"
+        donor_alert = f"تم تعديل Match للعضو: {instance.organ_type}"
+        hospital_alert = f"تم تعديل Match للعضو {instance.organ_type} بين المريض {patient.first_name} {patient.last_name} والمتبرع {donor.first_name} {donor.last_name}"
+        alert_type = 'info'
 
-    if alerts:
-        Alert.objects.create(
-            user=patient,
-            message="تحذير بعد العملية: " + "، ".join(alerts),
-            alert_type="critical"
-        )
+    # تحديث المريض
+    try:
+        profile = patient.patient_profile
+        profile.status = patient_status
+        profile.save()
+    except PatientMedicalProfile.DoesNotExist:
+        pass
+
+    # تحديث المتبرع
+    try:
+        donor_profile = donor.donor_profile
+        donor_profile.status = donor_status
+        donor_profile.save()
+    except DonorMedicalProfile.DoesNotExist:
+        pass
+
+    # إرسال Alerts
+    Alert.objects.create(user=patient, message=patient_alert, alert_type=alert_type)
+    Alert.objects.create(user=donor, message=donor_alert, alert_type=alert_type)
+    if hospital:
+        Alert.objects.create(hospital=hospital, message=hospital_alert, alert_type='hospital')
