@@ -223,8 +223,8 @@ class Appointment(models.Model):
     patient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='appointments')
     doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, null=True, blank=True)
     hospital = models.ForeignKey(Hospital, on_delete=models.SET_NULL, null=True, blank=True)
-
-    appointment_date = models.DateTimeField()
+    appointment_date = models.DateField()
+    appointment_time = models.TimeField()
     reason = models.TextField(blank=True, null=True)
 
     STATUS_CHOICES = (
