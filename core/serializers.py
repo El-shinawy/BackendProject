@@ -225,25 +225,25 @@ class UserSerializer(serializers.ModelSerializer):
         qs = Alert.objects.filter(user=obj)
         return AlertSerializer(qs, many=True).data
         
-def get_surgeries(self, obj):
-    from .serializers import SurgerySerializer
+    def get_surgeries(self, obj):
+        from .serializers import SurgerySerializer
 
-    if obj.role == 'patient':
-        qs = Surgery.objects.filter(
-            organ_matching__patient=obj
-        ).select_related(
-            'doctor', 'hospital', 'organ_matching'
-        ).order_by('-scheduled_date')  # آخر عملية
+        if obj.role == 'patient':
+            qs = Surgery.objects.filter(
+                organ_matching__patient=obj
+            ).select_related(
+                'doctor', 'hospital', 'organ_matching'
+            ).order_by('-scheduled_date')  # آخر عملية
 
-    elif obj.role == 'donor':
-        qs = Surgery.objects.filter(
-            organ_matching__donor=obj
-        ).select_related(
-            'doctor', 'hospital', 'organ_matching'
-        ).order_by('-scheduled_date')  # آخر عملية
+        elif obj.role == 'donor':
+            qs = Surgery.objects.filter(
+                organ_matching__donor=obj
+            ).select_related(
+                'doctor', 'hospital', 'organ_matching'
+            ).order_by('-scheduled_date')  # آخر عملية
 
-    else:
-        return None
+        else:
+            return None
 
     # ترجع العملية الأولى فقط بدل كل العمليات
     latest_surgery = qs.first()
