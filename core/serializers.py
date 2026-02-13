@@ -1,6 +1,8 @@
 from rest_framework import serializers
 from .models import *
 from django.contrib.auth import authenticate
+from django.utils import timezone
+import datetime
 
 
 # register users
@@ -469,17 +471,41 @@ class AppointmentSerializer(serializers.ModelSerializer):
             return {"id": obj.hospital.id, "name": obj.hospital.name}
         return None
 
+
+
     def validate(self, data):
-        # Doctor-Hospital check
+
         doctor = data.get('doctor')
         hospital = data.get('hospital')
-        if doctor and hospital and doctor.hospital != hospital:
-            raise serializers.ValidationError("Doctor must belong to selected hospital")
+        appointment_date = data.get('appointment_date')
+        appointment_time = data.get('appointment_time')
 
-        # Appointment date in future
-        if data.get("appointment_date") and data["appointment_date"] < timezone.now():
-            raise serializers.ValidationError("Appointment date must be in the future")
+        # Doctor-Hospital validation
+        if doctor and hospital and doctor.hospital != hospital:
+            raise serializers.ValidationError(
+                "Doctor must belong to selected hospital"
+            )
+
+        # Future validation (date + time)
+        if appointment_date and appointment_time:
+
+            appointment_datetime = datetime.datetime.combine(
+                appointment_date,
+                appointment_time
+            )
+
+            appointment_datetime = timezone.make_aware(
+                appointment_datetime,
+                timezone.get_current_timezone()
+            )
+
+            if appointment_datetime <= timezone.now():
+                raise serializers.ValidationError(
+                    "Appointment must be in the future"
+                )
+
         return data
+
 
 
 # ==========================
@@ -487,7 +513,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
 # ==========================
 class OrganMatchingSerializer(serializers.ModelSerializer):
     patient_detail = UserMiniSerializer(source='patient', read_only=True)
-    donor_detail = UserMiniSerializer(source='patient', read_only=True)
+    donor_detail = UserMiniSerializer(source='donor', read_only=True)
     hla_mismatch_count = serializers.IntegerField(read_only=True)
 
     class Meta:

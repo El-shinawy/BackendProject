@@ -241,41 +241,33 @@ class Appointment(models.Model):
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='مجدول')
     created_at = models.DateTimeField(auto_now_add=True)
-    def clean(self):
-        super().clean()   
 
+    def clean(self):
+        super().clean()
+
+        # تحقق من الدكتور والمستشفى
         if self.doctor and self.hospital and self.doctor.hospital != self.hospital:
             raise ValidationError("Doctor must belong to selected hospital")
-        
-        if self.appointment_date < timezone.now():
-            raise ValidationError("Appointment date must be in the future")
+
+        # دمج التاريخ والوقت
+        appointment_datetime = datetime.datetime.combine(
+            self.appointment_date,
+            self.appointment_time
+        )
+
+        appointment_datetime = timezone.make_aware(
+            appointment_datetime,
+            timezone.get_current_timezone()
+        )
+
+        if appointment_datetime <= timezone.now():
+            raise ValidationError("Appointment must be in the future")
 
     class Meta:
         ordering = ['-appointment_date']
-def clean(self):
-    super().clean()
 
-    # التأكد إن الدكتور تابع للمستشفى
-    if self.doctor and self.hospital and self.doctor.hospital != self.hospital:
-        raise ValidationError("Doctor must belong to selected hospital")
-
-    # دمج التاريخ والوقت في datetime واحد
-    appointment_datetime = datetime.datetime.combine(
-        self.appointment_date,
-        self.appointment_time
-    )
-
-    # تحويله لـ timezone aware
-    appointment_datetime = timezone.make_aware(
-        appointment_datetime,
-        timezone.get_current_timezone()
-    )
-
-    # منع الحجز في الماضي
-    if appointment_datetime <= timezone.now():
-        raise ValidationError("Appointment must be in the future")
-
-
+    def __str__(self):
+        return f"{self.patient} - {self.appointment_date}"
 
 # Organ & AI Matching
 class OrganMatching(models.Model):
@@ -371,9 +363,24 @@ class Surgery(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
     def clean(self):
-        if self.scheduled_date < timezone.now():
-            raise ValidationError("Surgery date must be in the future")
+        if self.scheduled_time:
+            surgery_datetime = datetime.datetime.combine(
+                self.scheduled_date,
+                self.scheduled_time
+            )
 
+            surgery_datetime = timezone.make_aware(
+                surgery_datetime,
+                timezone.get_current_timezone()
+            )
+
+            if surgery_datetime <= timezone.now():
+                raise ValidationError("Surgery must be in the future")
+        else:
+            if self.scheduled_date < timezone.now().date():
+                raise ValidationError("Surgery date must be in the future")
+
+    
     def __str__(self):
         return f"Surgery {self.surgery_number}"
     
