@@ -246,10 +246,10 @@ class UserSerializer(serializers.ModelSerializer):
             return None
 
     # ترجع العملية الأولى فقط بدل كل العمليات
-    latest_surgery = qs.first()
-    if latest_surgery:
-        return SurgerySerializer(latest_surgery).data
-    return None
+        latest_surgery = qs.first()
+        if latest_surgery:
+            return SurgerySerializer(latest_surgery).data
+        return None
 
 # ==========================
 
