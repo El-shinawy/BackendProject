@@ -5,6 +5,9 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 import datetime
 from django.urls import reverse
+from django.utils import timezone
+from django.core.exceptions import ValidationError
+import datetime
 
 
 # Custom User Manager
@@ -218,6 +221,10 @@ class DonorMedicalProfile(models.Model):
         return f"{self.donor} donates {self.organ_available}"
 
 
+
+
+
+
 # Appointment
 class Appointment(models.Model):
     patient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='appointments')
@@ -245,13 +252,29 @@ class Appointment(models.Model):
 
     class Meta:
         ordering = ['-appointment_date']
+def clean(self):
+    super().clean()
 
-    def clean(self):
-        if self.doctor and self.hospital and self.doctor.hospital != self.hospital:
-            raise ValidationError("Doctor must belong to selected hospital")
+    # التأكد إن الدكتور تابع للمستشفى
+    if self.doctor and self.hospital and self.doctor.hospital != self.hospital:
+        raise ValidationError("Doctor must belong to selected hospital")
 
-    def __str__(self):
-        return f"{self.patient} - {self.appointment_date}"
+    # دمج التاريخ والوقت في datetime واحد
+    appointment_datetime = datetime.datetime.combine(
+        self.appointment_date,
+        self.appointment_time
+    )
+
+    # تحويله لـ timezone aware
+    appointment_datetime = timezone.make_aware(
+        appointment_datetime,
+        timezone.get_current_timezone()
+    )
+
+    # منع الحجز في الماضي
+    if appointment_datetime <= timezone.now():
+        raise ValidationError("Appointment must be in the future")
+
 
 
 # Organ & AI Matching
