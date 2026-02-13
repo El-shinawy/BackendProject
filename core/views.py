@@ -152,7 +152,7 @@ class HospitalLoginView(generics.GenericAPIView):
                 "last_name": u.last_name,
                 "role": u.role,
                 "national_id": u.national_id,
-                "email": u.email,
+                # "email": u.email,
                 # أضف أي حقول تانية محتاجاها
             } for u in users
         ]
