@@ -832,13 +832,41 @@ class HospitalAlertSerializer(serializers.ModelSerializer):
             }
         return None
     
-
 class UnifiedLoginSerializer(serializers.Serializer):
-    national_id = serializers.CharField(required=False)
-    email = serializers.EmailField(required=False)
+    identifier = serializers.CharField()
     password = serializers.CharField(write_only=True)
 
     def validate(self, data):
-        if not data.get('national_id') and not data.get('email'):
-            raise serializers.ValidationError("لازم تبعتي national_id أو email")
+        identifier = data.get("identifier")
+        password = data.get("password")
+
+        if not identifier or not password:
+            raise serializers.ValidationError("الرجاء إدخال identifier و password")
+
+        # 🔹 لو فيه @ → Hospital
+        if "@" in identifier:
+            try:
+                hospital = Hospital.objects.get(email=identifier)
+            except Hospital.DoesNotExist:
+                raise serializers.ValidationError("المستشفى غير موجودة")
+
+            if not hospital.check_password(password):
+                raise serializers.ValidationError("بيانات المستشفى غير صحيحة")
+
+            data["type"] = "hospital"
+            data["hospital"] = hospital
+
+        # 🔹 غير كده → User
+        else:
+            user = authenticate(username=identifier, password=password)
+
+            if not user:
+                raise serializers.ValidationError("بيانات المستخدم غير صحيحة")
+
+            token, _ = Token.objects.get_or_create(user=user)
+
+            data["type"] = "user"
+            data["user"] = user
+            data["token"] = token.key
+
         return data
