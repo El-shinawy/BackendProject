@@ -1,20 +1,15 @@
-from rest_framework import viewsets, status 
+from rest_framework import viewsets, status ,generics
 from rest_framework.views import APIView
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.core.exceptions import ValidationError
 from .models import *
 from .serializers import *
-from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import authenticate
 from django.db.models import Count, Q
-from rest_framework import viewsets
-from rest_framework.decorators import action
 
-from .models import User
-from .serializers import UserSerializer
 
 
 
@@ -52,35 +47,35 @@ class RegisterUserView(generics.CreateAPIView):
 # ======================
 # View
 # ======================
-class LoginUserView(generics.GenericAPIView):
-    serializer_class = LoginSerializer
+# class LoginUserView(generics.GenericAPIView):
+#     serializer_class = LoginSerializer
 
-    def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+#     def post(self, request, *args, **kwargs):
+#         serializer = self.get_serializer(data=request.data)
         
-        # تحقق من البيانات أولاً
-        if not serializer.is_valid():
-            return Response({
-                "detail": "Invalid input",
-                "errors": serializer.errors
-            }, status=status.HTTP_400_BAD_REQUEST)
+#         # تحقق من البيانات أولاً
+#         if not serializer.is_valid():
+#             return Response({
+#                 "detail": "Invalid input",
+#                 "errors": serializer.errors
+#             }, status=status.HTTP_400_BAD_REQUEST)
 
-        national_id = serializer.validated_data['national_id']
-        password = serializer.validated_data['password']
+#         national_id = serializer.validated_data['national_id']
+#         password = serializer.validated_data['password']
 
-        user = authenticate(request ,username=national_id, password=password)
-        if not user:
-            return Response({
-                "Message": "Invalid credentials. Please check national_id and password."
-            }, status=status.HTTP_401_UNAUTHORIZED)
+#         user = authenticate(request ,username=national_id, password=password)
+#         if not user:
+#             return Response({
+#                 "Message": "Invalid credentials. Please check national_id and password."
+#             }, status=status.HTTP_401_UNAUTHORIZED)
 
-        token, _ = Token.objects.get_or_create(user=user)
-        return Response({
-            "id": user.id,
-            "role": user.role,
-            "token": token.key,
-            "Message": "Login successful"
-        })
+#         token, _ = Token.objects.get_or_create(user=user)
+#         return Response({
+#             "id": user.id,
+#             "role": user.role,
+#             "token": token.key,
+#             "Message": "Login successful"
+#         })
 
 # LOGOUT
 class LogoutUserView(APIView):
@@ -125,56 +120,56 @@ class HospitalRegisterView(generics.GenericAPIView):
         }, status=status.HTTP_201_CREATED)
     
 
-class HospitalLoginView(generics.GenericAPIView):
-    serializer_class = HospitalLoginSerializer
+# class HospitalLoginView(generics.GenericAPIView):
+#     serializer_class = HospitalLoginSerializer
 
-    def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+#     def post(self, request, *args, **kwargs):
+#         serializer = self.get_serializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
 
-        email = serializer.validated_data['email']
-        password = serializer.validated_data['password']
+#         email = serializer.validated_data['email']
+#         password = serializer.validated_data['password']
 
-        try:
-            hospital = Hospital.objects.get(email=email)
-        except Hospital.DoesNotExist:
-            return Response({"message": "Hospital not found"}, status=status.HTTP_404_NOT_FOUND)
+#         try:
+#             hospital = Hospital.objects.get(email=email)
+#         except Hospital.DoesNotExist:
+#             return Response({"message": "Hospital not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not hospital.check_password(password):
-            return Response({"message": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
+#         if not hospital.check_password(password):
+#             return Response({"message": "Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
 
-        # بيانات المستخدمين المرتبطين بالمستشفى
-        users = User.objects.filter(hospital=hospital)
-        users_data = [
-            {
-                "id": u.id,
-                "first_name": u.first_name,
-                "last_name": u.last_name,
-                "role": u.role,
-                "national_id": u.national_id,
-                # "email": u.email,
-                # أضف أي حقول تانية محتاجاها
-            } for u in users
-        ]
+#         # بيانات المستخدمين المرتبطين بالمستشفى
+#         users = User.objects.filter(hospital=hospital)
+#         users_data = [
+#             {
+#                 "id": u.id,
+#                 "first_name": u.first_name,
+#                 "last_name": u.last_name,
+#                 "role": u.role,
+#                 "national_id": u.national_id,
+#                 # "email": u.email,
+#                 # أضف أي حقول تانية محتاجاها
+#             } for u in users
+#         ]
 
-        # كل بيانات المستشفى
-        hospital_data = {
-            "id": hospital.id,
-            "name": hospital.name,
-            "hospital_type": hospital.hospital_type,
-            "location": hospital.location,
-            "license_number": hospital.license_number,
-            "phone": hospital.phone,
-            "emergency_phone": hospital.emergency_phone,
-            "email": hospital.email,
-            "working_hours": hospital.working_hours,
-        }
+#         # كل بيانات المستشفى
+#         hospital_data = {
+#             "id": hospital.id,
+#             "name": hospital.name,
+#             "hospital_type": hospital.hospital_type,
+#             "location": hospital.location,
+#             "license_number": hospital.license_number,
+#             "phone": hospital.phone,
+#             "emergency_phone": hospital.emergency_phone,
+#             "email": hospital.email,
+#             "working_hours": hospital.working_hours,
+#         }
 
-        return Response({
-            "message": "Login successful",
-            "hospital": hospital_data,
-            "users": users_data
-        }, status=status.HTTP_200_OK)
+#         return Response({
+#             "message": "Login successful",
+#             "hospital": hospital_data,
+#             "users": users_data
+#         }, status=status.HTTP_200_OK)
 
 
 # ==========================
@@ -543,4 +538,47 @@ class SurgeryReportViewSet(viewsets.ModelViewSet):
 
 
 
-    
+
+class UnifiedLoginView(APIView):
+    def post(self, request):
+        serializer = UnifiedLoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        national_id = serializer.validated_data.get('national_id')
+        email = serializer.validated_data.get('email')
+        password = serializer.validated_data['password']
+
+        # 🔹 تسجيل دخول المستخدم
+        if national_id:
+            user = authenticate(request, username=national_id, password=password)
+            if not user:
+                return Response({"message": "بيانات المستخدم غير صحيحة"}, status=status.HTTP_401_UNAUTHORIZED)
+
+            token, _ = Token.objects.get_or_create(user=user)
+            return Response({
+                "type": "user",
+                "id": user.id,
+                "role": user.role,
+                "token": token.key,
+                "message": "تم تسجيل الدخول كمستخدم بنجاح"
+            }, status=status.HTTP_200_OK)
+
+        # 🔹 تسجيل دخول المستشفى
+        if email:
+            try:
+                hospital = Hospital.objects.get(email=email)
+            except Hospital.DoesNotExist:
+                return Response({"message": "المستشفى غير موجودة"}, status=status.HTTP_404_NOT_FOUND)
+
+            if not hospital.check_password(password):
+                return Response({"message": "بيانات المستشفى غير صحيحة"}, status=status.HTTP_401_UNAUTHORIZED)
+
+            return Response({
+                "type": "hospital",
+                "id": hospital.id,
+                "name": hospital.name,
+                "hospital_type": hospital.hospital_type,
+                "message": "تم تسجيل الدخول كمستشفى بنجاح"
+            }, status=status.HTTP_200_OK)
+
+        return Response({"message": "الرجاء إدخال national_id أو email"}, status=status.HTTP_400_BAD_REQUEST)
