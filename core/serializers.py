@@ -3,6 +3,7 @@ from .models import *
 from django.contrib.auth import authenticate
 from django.utils import timezone
 import datetime
+from rest_framework.authtoken.models import Token
 
 # register users
 class RegisterSerializer(serializers.ModelSerializer):
