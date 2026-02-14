@@ -3,8 +3,6 @@ from .models import *
 from django.contrib.auth import authenticate
 from django.utils import timezone
 import datetime
-from rest_framework import serializers
-from .models import SurgeryReport, Surgery
 
 # register users
 class RegisterSerializer(serializers.ModelSerializer):
@@ -75,9 +73,9 @@ class RegisterSerializer(serializers.ModelSerializer):
 
 
 # LOGIN  users
-class LoginSerializer(serializers.Serializer):
-    national_id = serializers.CharField()
-    password = serializers.CharField(write_only=True)
+# class LoginSerializer(serializers.Serializer):
+#     national_id = serializers.CharField()
+#     password = serializers.CharField(write_only=True)
 
 
 
@@ -92,9 +90,9 @@ class HospitalRegisterSerializer(serializers.ModelSerializer):
 
 # Hospital Login
 
-class HospitalLoginSerializer(serializers.Serializer):
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
+# class HospitalLoginSerializer(serializers.Serializer):
+#     email = serializers.EmailField()
+#     password = serializers.CharField(write_only=True)
 
 
 # ==========================
@@ -496,7 +494,7 @@ class PatientMedicalProfileSerializer(serializers.ModelSerializer):
 
     def get_supervisor_doctor_detail(self, obj):
         if obj.patient.supervisor_doctor:
-         return DoctorSerializer(obj.patient.supervisor_doctor).data
+            return DoctorSerializer(obj.patient.supervisor_doctor).data
         return None
 
 
@@ -616,8 +614,8 @@ class OrganMatchingSerializer(serializers.ModelSerializer):
             'ai_result', 'status', 'created_at'
         ]
         read_only_fields = ['hla_mismatch_count', 'match_percentage', 'ai_result', 'created_at']
-        def get_patient_detail(self, obj):
-            return {"id": obj.patient.id, "full_name": f"{obj.patient.first_name} {obj.patient.last_name}"}
+    def get_patient_detail(self, obj):
+         return {"id": obj.patient.id, "full_name": f"{obj.patient.first_name} {obj.patient.last_name}"}
 
     def get_donor_detail(self, obj):
         return {"id": obj.donor.id, "full_name": f"{obj.donor.first_name} {obj.donor.last_name}"}
@@ -833,3 +831,14 @@ class HospitalAlertSerializer(serializers.ModelSerializer):
                 "name": obj.hospital.name
             }
         return None
+    
+
+class UnifiedLoginSerializer(serializers.Serializer):
+    national_id = serializers.CharField(required=False)
+    email = serializers.EmailField(required=False)
+    password = serializers.CharField(write_only=True)
+
+    def validate(self, data):
+        if not data.get('national_id') and not data.get('email'):
+            raise serializers.ValidationError("لازم تبعتي national_id أو email")
+        return data
