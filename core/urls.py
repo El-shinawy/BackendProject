@@ -43,7 +43,6 @@ router.register(r'surgery-reports', SurgeryReportViewSet, basename='surgery-repo
 router.register(r'patient-priority', PatientPriorityViewSet, basename='patient-priority')
 router.register(r'alerts', AlertViewSet, basename='alert')
 # router.register(r'vital-signs', VitalSignViewSet, basename='vital-signs')
-router.register(r'hospital-alerts', HospitalAlertViewSet, basename='hospital-alert')
 
 
 
@@ -52,9 +51,10 @@ router.register(r'hospital-alerts', HospitalAlertViewSet, basename='hospital-ale
 urlpatterns = [
     path('', include(router.urls)),
     path('register/', RegisterUserView.as_view(), name='register-user'),
-    path('login/', LoginUserView.as_view(), name='login-user'),
+    # path('login/', LoginUserView.as_view(), name='login-user'),
     path('logout/', LogoutUserView.as_view(), name='logout-user'),
     path('hospital/register/', HospitalRegisterView.as_view(), name='hospital-register'),
-    path('hospital/login/', HospitalLoginView.as_view(), name='hospital-login'),
+    # path('hospital/login/', HospitalLoginView.as_view(), name='hospital-login'),
+    path('login/', UnifiedLoginView.as_view(), name='unified-login')
     # path('users/search_by_organ/', search_users_by_organ, name='search_by_organ'),
 ]
