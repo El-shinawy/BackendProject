@@ -544,34 +544,8 @@ class UnifiedLoginView(APIView):
         serializer = UnifiedLoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        national_id = serializer.validated_data.get('national_id')
-        email = serializer.validated_data.get('email')
-        password = serializer.validated_data['password']
-
-        # 🔹 تسجيل دخول المستخدم
-        if national_id:
-            user = authenticate(request, username=national_id, password=password)
-            if not user:
-                return Response({"message": "بيانات المستخدم غير صحيحة"}, status=status.HTTP_401_UNAUTHORIZED)
-
-            token, _ = Token.objects.get_or_create(user=user)
-            return Response({
-                "type": "user",
-                "id": user.id,
-                "role": user.role,
-                "token": token.key,
-                "message": "تم تسجيل الدخول كمستخدم بنجاح"
-            }, status=status.HTTP_200_OK)
-
-        # 🔹 تسجيل دخول المستشفى
-        if email:
-            try:
-                hospital = Hospital.objects.get(email=email)
-            except Hospital.DoesNotExist:
-                return Response({"message": "المستشفى غير موجودة"}, status=status.HTTP_404_NOT_FOUND)
-
-            if not hospital.check_password(password):
-                return Response({"message": "بيانات المستشفى غير صحيحة"}, status=status.HTTP_401_UNAUTHORIZED)
+        if serializer.validated_data["type"] == "hospital":
+            hospital = serializer.validated_data["hospital"]
 
             return Response({
                 "type": "hospital",
@@ -579,6 +553,16 @@ class UnifiedLoginView(APIView):
                 "name": hospital.name,
                 "hospital_type": hospital.hospital_type,
                 "message": "تم تسجيل الدخول كمستشفى بنجاح"
-            }, status=status.HTTP_200_OK)
+            })
 
-        return Response({"message": "الرجاء إدخال national_id أو email"}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            user = serializer.validated_data["user"]
+            token = serializer.validated_data["token"]
+
+            return Response({
+                "type": "user",
+                "id": user.id,
+                "role": user.role,
+                "token": token,
+                "message": "تم تسجيل الدخول كمستخدم بنجاح"
+            })
