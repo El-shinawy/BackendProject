@@ -1,3 +1,5 @@
+import  uuid
+import binascii, os
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.contrib.auth.hashers import make_password, check_password
@@ -5,9 +7,7 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 import datetime
 from django.urls import reverse
-from django.utils import timezone
-from django.core.exceptions import ValidationError
-import datetime
+from django.conf import settings
 
 
 # Custom User Manager
@@ -19,6 +19,7 @@ class CustomUserManager(BaseUserManager):
         user.set_password(password)
         user.save(using=self._db)
         return user
+
     def create_superuser(self, national_id, password=None, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
@@ -33,15 +34,16 @@ class CustomUserManager(BaseUserManager):
 
 # User
 class User(AbstractBaseUser, PermissionsMixin):
-
     ROLE_CHOICES = (
-        ('patient', 'Patient'),
-        ('donor', 'Donor'),
+        ('patient', 'patient'),
+        ('donor', 'donor'),
     )
     STATUS_CHOICES = (
         ('قيد الانتظار', 'قيد الانتظار'),
-        ('موافق عليه', 'موافق عليه'),
+        ('جاهز', 'جاهز'),
         ('قيد المراجعة', 'قيد المراجعة'),
+        ('تحت المطابقه', 'تحت المطابقه'),
+        ('تحت العمليه', 'تحت العمليه'),
         ('مرفوض', 'مرفوض'),
     )
 
@@ -54,15 +56,17 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     GENDER_CHOICES = (
         ('ذكر', 'ذكر '),
-        ("انثي","انثي"),
+        ("انثي", "انثي"),
 
     )
     national_id = models.CharField(max_length=14, unique=True, null=False, blank=False)
     first_name = models.CharField(max_length=50, null=False, blank=False)
     last_name = models.CharField(max_length=50, null=False, blank=False)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, null=False, blank=False)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', null=False, blank=False)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='قيد الانتظار', null=False, blank=False)
     phone = models.CharField(max_length=20, blank=True, null=True)
+    email = models.EmailField(unique=True, blank=True, null=True)
+    city = models.CharField(max_length=50, default="القاهرة")
     birthdate = models.DateField(null=False, blank=False)
     height_cm = models.FloatField(null=True, blank=True)
     weight_kg = models.FloatField(null=True, blank=True)
@@ -78,18 +82,18 @@ class User(AbstractBaseUser, PermissionsMixin):
     HLA_DR_2 = models.CharField(max_length=10, blank=True, null=True)
 
     PRA = models.FloatField(null=True, blank=True)
-    CMV_status = models.BooleanField(default=False)  
+    CMV_status = models.BooleanField(default=False)
     EBV_status = models.BooleanField(default=False)
-   
+
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     supervisor_doctor = models.ForeignKey(
-    'Doctor',
-    on_delete=models.SET_NULL,   # أو CASCADE حسب منطق المشروع
-    related_name="patients",
-    null=True,
-    blank=False
-)
+        'Doctor',
+        on_delete=models.SET_NULL,  # أو CASCADE حسب منطق المشروع
+        related_name="patients",
+        null=True,
+        blank=False
+    )
 
     hospital = models.ForeignKey(
         'Hospital', null=True, blank=True,
@@ -105,14 +109,14 @@ class User(AbstractBaseUser, PermissionsMixin):
     REQUIRED_FIELDS = ['first_name', 'last_name']
 
     objects = CustomUserManager()
+
     def save(self, *args, **kwargs):
-        if self.height_cm and self.height_cm > 0 and self.weight_kg:
+        if self.height_cm and self.weight_kg and self.height_cm > 0:
             height_m = self.height_cm / 100
             self.bmi = round(self.weight_kg / (height_m ** 2), 2)
         else:
             self.bmi = None
         super().save(*args, **kwargs)
-
 
     def is_donor_medically_eligible(self):
         if self.role != 'donor' or self.bmi is None:
@@ -124,11 +128,11 @@ class User(AbstractBaseUser, PermissionsMixin):
 
 
 class OrganType(models.TextChoices):
-    KIDNEY = 'كلية', 'كلية'
-    LIVER = 'كبد', 'كبد'
-    HEART = 'قلب', 'قلب'
-    LUNG = 'رئة', 'رئة'
-    PANCREAS = 'بنكرياس', 'بنكرياس'
+    كلية = 'كلية', 'كلية'
+    كبد = 'كبد', 'كبد'
+    قلب = 'قلب', 'قلب'
+    رئة = 'رئة', 'رئة'
+    بنكرياس = 'بنكرياس', 'بنكرياس'
 
 
 # Hospital & Doctor
@@ -138,15 +142,33 @@ class Hospital(models.Model):
         ('خاص', 'خاص'),
     )
     name = models.CharField(max_length=100, null=False, blank=False)
-    city = models.CharField(max_length=50, default="Cairo")
+    city = models.CharField(max_length=50, default="القاهره")
     location = models.CharField(max_length=200, null=False, blank=False)
     license_number = models.CharField(max_length=50, blank=True, null=True)
     phone = models.CharField(max_length=20, blank=False, null=False)
     emergency_phone = models.CharField(max_length=20, blank=True, null=True)
-    email = models.EmailField(unique=True , default="email@gmail.com")
+    email = models.EmailField(unique=True, null=True, blank=True)
     working_hours = models.CharField(max_length=100, blank=False, null=False)
     hospital_type = models.CharField(max_length=10, choices=HOSPITAL_TYPE_CHOICES, default='حكومي')
-    password = models.CharField(max_length=128 , default="enter your password") 
+    password = models.CharField(max_length=128)
+
+    #     ministry = models.ForeignKey(
+    #     'Ministry',
+    #     on_delete=models.SET_NULL,
+    #     null=True,
+    #     blank=True,
+    #     related_name="hospitals"
+    # )
+
+    #     status = models.CharField(
+    #         max_length=20,
+    #         choices=[
+    #             ('تحت المراجعه', 'تحت المراجعه'),
+    #             ('نشط', 'نشط'),
+    #             ('مرفوض', 'مرفوض'),
+    #         ],
+    #         default='تحت المراجعه'
+    # )
     def set_password(self, raw_password):
         self.password = make_password(raw_password)
         self.save(update_fields=['password'])
@@ -156,15 +178,12 @@ class Hospital(models.Model):
 
     def __str__(self):
         return self.name
-    
-
-
 
 
 class Doctor(models.Model):
-    name = models.CharField(max_length=100 , null=False)
-    specialty = models.CharField(max_length=100 , null=False ,blank=False)
-    hospital = models.ForeignKey(Hospital, on_delete=models.CASCADE, related_name='doctors' , null=False)
+    name = models.CharField(max_length=100, null=False)
+    specialty = models.CharField(max_length=100, null=False, blank=False)
+    hospital = models.ForeignKey(Hospital, on_delete=models.CASCADE, related_name='doctors', null=False)
     phone = models.CharField(max_length=20)
 
     def __str__(self):
@@ -173,10 +192,11 @@ class Doctor(models.Model):
 
 # Chronic Diseases
 class ChronicDisease(models.Model):
-    name = models.CharField(max_length=255)
+    name = models.CharField(max_length=255, null=False, blank=False, unique=True)
 
     def __str__(self):
         return self.name
+
 
 class UserChronicDisease(models.Model):
     SEVERITY_CHOICES = (
@@ -187,6 +207,7 @@ class UserChronicDisease(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='chronic_diseases')
     disease = models.ForeignKey(ChronicDisease, on_delete=models.CASCADE)
     severity = models.CharField(max_length=20, choices=SEVERITY_CHOICES)
+
     def __str__(self):
         return f"{self.user} - {self.disease}"
 
@@ -200,12 +221,11 @@ class PatientMedicalProfile(models.Model):
     )
     organ_needed = models.CharField(
         max_length=20,
-        choices=OrganType.choices,default="Kindy"
+        choices=OrganType.choices, default='كبد'
     )
 
     def __str__(self):
         return f"{self.patient} needs {self.organ_needed}"
-
 
 
 class DonorMedicalProfile(models.Model):
@@ -217,15 +237,11 @@ class DonorMedicalProfile(models.Model):
     organ_available = models.CharField(
         max_length=20,
         choices=OrganType.choices,
-        default="Kindy"
+        default='كبد'
     )
 
     def __str__(self):
         return f"{self.donor} donates {self.organ_available}"
-
-
-
-
 
 
 # Appointment
@@ -248,20 +264,18 @@ class Appointment(models.Model):
     def clean(self):
         super().clean()
 
-        # تحقق من الدكتور والمستشفى
         if self.doctor and self.hospital and self.doctor.hospital != self.hospital:
             raise ValidationError("Doctor must belong to selected hospital")
 
-        # دمج التاريخ والوقت
         appointment_datetime = datetime.datetime.combine(
             self.appointment_date,
             self.appointment_time
         )
-
-        appointment_datetime = timezone.make_aware(
-            appointment_datetime,
-            timezone.get_current_timezone()
-        )
+        if timezone.is_naive(appointment_datetime):
+            appointment_datetime = timezone.make_aware(
+                appointment_datetime,
+                timezone.get_current_timezone()
+            )
 
         if appointment_datetime <= timezone.now():
             raise ValidationError("Appointment must be in the future")
@@ -272,32 +286,47 @@ class Appointment(models.Model):
     def __str__(self):
         return f"{self.patient} - {self.appointment_date}"
 
+
 # Organ & AI Matching
 class OrganMatching(models.Model):
     STATUS_CHOICES = (
+        ('قيد التحليل', 'قيد التحليل'),
+        ('تحت المراجعه', 'تحت المراجعه'),
+        ('تحت المطابقه', 'تحت المطابقه'),
         ('قيد الانتظار', 'قيد الانتظار'),
-        ( 'مطابق', 'مطابق'),
-        ('مرفوض', 'مرفوض'),
     )
     patient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='patient_matches')
+    request_number = models.CharField(max_length=20, unique=True, blank=True)
     donor = models.ForeignKey(User, on_delete=models.CASCADE, related_name='donor_matches')
-    organ_type = models.CharField(max_length=50)
-    match_percentage = models.FloatField( null=True,        blank=True,      default=None      )
+    organ_type = models.CharField(max_length=20, choices=OrganType.choices)
+    match_percentage = models.FloatField(null=True, blank=True, default=None)
     ai_result = models.JSONField(null=True, blank=True)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='قيد التحليل')
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['-match_percentage']
 
-
-
     def update_match(self):
         result = self.calculate_match(self.patient, self.donor)
         self.match_percentage = result['match_percentage']
         self.ai_result = result['ai_result']
-        self.status = 'pending'
+        self.status = 'تحت المراجعه'
         self.save()
+
+    def save(self, *args, **kwargs):
+        if not self.request_number:
+            # توليد رقم فريد تلقائي (مثال: OM-XXXX)
+            self.request_number = f"OM-{uuid.uuid4().hex[:8].upper()}"
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        if self.patient.role != "patient":
+            raise ValidationError("Selected patient must have role patient")
+
+        if self.donor.role != "donor":
+            raise ValidationError("Selected donor must have role donor")
 
     def __str__(self):
         return f"{self.patient} ↔ {self.donor} ({self.match_percentage}%)"
@@ -307,7 +336,7 @@ class OrganMatching(models.Model):
     @property
     def hla_mismatch_count(self):
         mismatches = 0
-        hla_fields = ['HLA_A_1','HLA_A_2','HLA_B_1','HLA_B_2','HLA_DR_1','HLA_DR_2']
+        hla_fields = ['HLA_A_1', 'HLA_A_2', 'HLA_B_1', 'HLA_B_2', 'HLA_DR_1', 'HLA_DR_2']
         for field in hla_fields:
             patient_val = getattr(self.patient, field, None)
             donor_val = getattr(self.donor, field, None)
@@ -315,11 +344,10 @@ class OrganMatching(models.Model):
                 mismatches += 1
         return mismatches
 
-
     @staticmethod
     def calculate_match(patient, donor):
         mismatches = 0
-        hla_fields = ['HLA_A_1','HLA_A_2','HLA_B_1','HLA_B_2','HLA_DR_1','HLA_DR_2']
+        hla_fields = ['HLA_A_1', 'HLA_A_2', 'HLA_B_1', 'HLA_B_2', 'HLA_DR_1', 'HLA_DR_2']
         for field in hla_fields:
             patient_val = getattr(patient, field, None)
             donor_val = getattr(donor, field, None)
@@ -341,12 +369,6 @@ class OrganMatching(models.Model):
             }
         }
 
-    def update_match(self):
-        result = self.calculate_match(self.patient, self.donor)
-        self.match_percentage = result['match_percentage']
-        self.ai_result = result['ai_result']
-        self.status = 'pending'  
-        self.save()
 
 # Surgery
 class Surgery(models.Model):
@@ -363,7 +385,7 @@ class Surgery(models.Model):
         ('رئة', 'رئة'),
         ('عظام', 'عظام'),
     ]
-     
+
     surgery_number = models.CharField(max_length=50, unique=True)
     organ_matching = models.OneToOneField(OrganMatching, on_delete=models.CASCADE)
     surgery_name = models.CharField(max_length=100)
@@ -373,8 +395,8 @@ class Surgery(models.Model):
         default='كلى'
     )
 
-    hospital = models.ForeignKey(Hospital, on_delete=models.CASCADE , null=False)
-    doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, null=True )
+    hospital = models.ForeignKey(Hospital, on_delete=models.CASCADE, null=False)
+    doctor = models.ForeignKey(Doctor, on_delete=models.SET_NULL, null=True)
 
     scheduled_date = models.DateField()
     scheduled_time = models.TimeField(null=True, blank=True)
@@ -384,8 +406,8 @@ class Surgery(models.Model):
         choices=SURGERY_STATUS,
         default='مجدولة'
     )
-    duration = models.PositiveIntegerField(null=True, blank=True)  
-    operation_room = models.CharField(max_length=100, null=True, blank=True) 
+    duration = models.PositiveIntegerField(null=True, blank=True)
+    operation_room = models.CharField(max_length=100, null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -410,11 +432,8 @@ class Surgery(models.Model):
 
     def get_admin_url(self):
         return reverse("admin:core_surgery_change", args=[self.id])
-    
-    # ============================
-    # اسم العملية والـ قسم
-    # ============================
-    
+
+
 # MRI Reports
 class MRIReport(models.Model):
     patient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='mri_reports')
@@ -438,12 +457,13 @@ class PatientPriority(models.Model):
     score = models.FloatField(default=0)
     level = models.CharField(
         max_length=20,
-    choices = [
-    ('اولوليه عاليه', 'اولوليه عاليه'),
-    ('اولوليه متوسطة', 'اولوليه متوسطة'),
-    ('اولوليه منخفضه', 'اولوليه منخفضه'),
+        choices=[
+            ('اولوليه عاليه', 'اولوليه عاليه'),
+            ('اولوليه متوسطة', 'اولوليه متوسطة'),
+            ('اولوليه منخفضه', 'اولوليه منخفضه'),
+            ('حرجة جداً', 'حرجة جداً'),
 
-]
+        ]
     )
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -454,13 +474,12 @@ class PatientPriority(models.Model):
 # Alerts
 class Alert(models.Model):
     ALERT_TYPES = (
-    ('معلومة', 'معلومة'),
-    ('تحذير', 'تحذير'),
-    ('طبي', 'طبي'),
-    ('حرج', 'حرج'),
-)
+        ('معلومة', 'معلومة'),
+        ('تحذير', 'تحذير'),
+        ('طبي', 'طبي'),
+        ('حرج', 'حرج'),
+    )
 
-    
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='alerts')
     message_title = models.TextField()
     message = models.TextField(default="title")
@@ -471,14 +490,15 @@ class Alert(models.Model):
 
     def __str__(self):
         return f"{self.user} - {self.alert_type}"
+
+
 class AlertHospital(models.Model):
     ALERT_TYPES = (
-    ('معلومة', 'معلومة'),
-    ('تحذير', 'تحذير'),
-    ('حرج', 'حرج'),
-)
+        ('معلومة', 'معلومة'),
+        ('تحذير', 'تحذير'),
+        ('حرج', 'حرج'),
+    )
 
-    
     hospital = models.ForeignKey(Hospital, on_delete=models.CASCADE, null=True, blank=True)
     message_title = models.TextField()
     message = models.TextField(default="title")
@@ -494,20 +514,24 @@ class AlertHospital(models.Model):
 class UserReport(models.Model):
     reportState = (
         ('مكتمل', 'مكتمل'),
-        ('تحت المراجعه', 'تحت المراجعه'),
+        ('تحت الاجراء', 'تحت الاجراء'),
+    )
+    type = (
+        ('اشعه', 'اشعه'),
+        ('تحاليل', 'تحاليل'),
+        ('تقرير طبي', 'تقرير طبي'),
     )
 
     patient = models.ForeignKey(User, on_delete=models.CASCADE, related_name='user_reports')
-    report_type = models.CharField(max_length=50)  # زي "MRI", "Blood Test", "X-Ray" أو أي نوع آخر
+    report_type = models.CharField(max_length=50, choices=type)
     report_file = models.FileField(upload_to='user_reports/', null=True, blank=True)
     description = models.TextField(null=True, blank=True)
-    state = models.CharField(max_length=20, choices=reportState  , null=False)
+    state = models.CharField(max_length=20, choices=reportState, null=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
         return f"{self.patient} - {self.report_type}"
-
 
 
 class SurgeryReport(models.Model):
@@ -517,7 +541,7 @@ class SurgeryReport(models.Model):
     complications = models.TextField(null=True, blank=True)
     doctor_notes = models.TextField(null=True, blank=True)
 
-    blood_pressure = models.CharField(max_length=20, null=True, blank=True) 
+    blood_pressure = models.CharField(max_length=20, null=True, blank=True)
     recorded_at = models.DateTimeField(auto_now_add=True)
     temperature_c = models.FloatField(null=True, blank=True)
     heart_rate = models.PositiveIntegerField(null=True, blank=True)
@@ -528,29 +552,66 @@ class SurgeryReport(models.Model):
     report_image = models.ImageField(upload_to='surgery_reports/images/', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    def __str__(self):
+        return f"Report for {self.surgery}"
 
 
+class Allergy(models.Model):
+    SEVERITY_CHOICES = [
+        ('منخفض', 'منخفض'),
+        ('متوسط', 'متوسط'),
+        ('عالي', 'عالي'),
+        ('حرج', 'حرج'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='allergies')
+    name = models.CharField(max_length=100)
+    severity = models.CharField(max_length=10, choices=SEVERITY_CHOICES, default='منخفض')
+
+    def __str__(self):
+        return f"{self.name} - {self.user}"
 
 
+class Medicine(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='medicines'
+    )
+    name = models.CharField(max_length=255)
+    frequency_per_day = models.PositiveIntegerField(default=1)  # عدد المرات اليومية
+    notes = models.TextField(blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.name} - {self.user}"
 
 
+class HospitalToken(models.Model):
+    hospital = models.OneToOneField('Hospital', on_delete=models.CASCADE, related_name='token')
+    key = models.CharField(max_length=40, unique=True, blank=True)
 
+    def save(self, *args, **kwargs):
+        if not self.key:
+            self.key = binascii.hexlify(os.urandom(20)).decode()  # 40 char hex
+        super().save(*args, **kwargs)
 
+    def __str__(self):
+        return f"Token for {self.hospital.name}"
 
+# class Ministry(models.Model):
+#     name = models.CharField(max_length=200)
+#     email = models.EmailField(unique=True)
+#     phone = models.CharField(max_length=20)
+#     password = models.CharField(max_length=128)
 
+#     created_at = models.DateTimeField(auto_now_add=True)
 
+#     def set_password(self, raw_password):
+#         self.password = make_password(raw_password)
+#         self.save(update_fields=['password'])
 
-
-
-
-
-# class VitalSign(models.Model):
-#     surgery_report = models.ForeignKey(
-#         SurgeryReport,
-#         on_delete=models.CASCADE,
-#         related_name='vital_signs'
-#     )
-
+#     def check_password(self, raw_password):
+#         return check_password(raw_password, self.password)
 
 #     def __str__(self):
-#         return f"Vitals for {self.surgery_report.surgery.surgery_number} @ {self.recorded_at}"
+#         return self.name
